@@ -23,11 +23,11 @@ export interface RoadmapItem { id: string; user_id: string; analysis_id: string 
 
 // Status values written to roadmap_items.status
 export const ROADMAP_STATUSES = [
-  { value: "not_started", label: "Not started" },
-  { value: "in_progress", label: "In progress" },
-  { value: "completed", label: "Completed" },
+  { value: "NOT_STARTED", label: "Not started" },
+  { value: "IN_PROGRESS", label: "In progress" },
+  { value: "COMPLETED", label: "Completed" },
 ] as const;
-export const isCompleted = (s: string | null) => String(s ?? "").toLowerCase() === "completed";
+export const isCompleted = (s: string | null) => String(s ?? "").toUpperCase() === "COMPLETED";
 
 async function run<T>(p: PromiseLike<{ data: T; error: unknown }>): Promise<T> {
   const { data, error } = await p;
@@ -337,32 +337,53 @@ export const useRoadmap = (userId: string) =>
 export function useGenerateRoadmap(userId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (analysis: Analysis & { results: AnalysisResult[] }) => {
-      const existing = (await run(supabase.from("roadmap_items").select("id").eq("user_id", userId).eq("analysis_id", analysis.id))) as { id: string }[];
-      if (existing.length) throw new Error("A roadmap already exists for this analysis.");
-      const reqs = (await run(supabase.from("career_requirements").select("skill_name,description").eq("career_id", analysis.career_id))) as { skill_name: string; description: string | null }[];
-      const desc = Object.fromEntries(reqs.map((r) => [normalize(r.skill_name), r.description]));
-      const drafts = buildRoadmap(analysis.results, desc);
-      if (!drafts.length) throw new Error("No skill gaps — nothing to add to the roadmap.");
-      const rowsFull = drafts.map((d) => ({ ...d, user_id: userId, analysis_id: analysis.id, status: "not_started" }));
-      let ins = await supabase.from("roadmap_items").insert(rowsFull).select();
-      if (ins.error && ["42703", "22P02", "PGRST204"].includes(String(ins.error.code))) {
-        // fall back to core columns if the extra ones have a different type
-        ins = await supabase.from("roadmap_items").insert(rowsFull.map(({ week_number: _w, skill: _s, tasks: _t, ...rest }) => rest)).select();
+    mutationFn: async (analysis?: { id?: string } | null) => {
+      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      if (sessionErr || !sessionData.session) {
+        throw new Error("You must be signed in to generate an AI roadmap.");
       }
-      if (ins.error) throw new Error(errMsg(ins.error));
-      return drafts.length;
+      const token = sessionData.session.access_token;
+      const res = await fetch("/api/roadmap/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(analysis?.id ? { analysisId: analysis.id } : {}),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "We couldn't generate your roadmap right now. Please try again.");
+      }
+      return data as { success: boolean; summary: string; estimatedWeeks: number; items: RoadmapItem[] };
     },
-    onSuccess: (n) => { qc.invalidateQueries({ queryKey: ["roadmap", userId] }); toast.success(`Roadmap created with ${n} items`); },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["roadmap", userId] });
+      qc.invalidateQueries({ queryKey: ["analyses", userId] });
+      toast.success(
+        data?.estimatedWeeks
+          ? `AI Roadmap generated (${data.estimatedWeeks} weeks)`
+          : "Roadmap generated successfully"
+      );
+    },
     onError: (e) => toast.error(errMsg(e)),
   });
 }
+
 
 export function useSetRoadmapStatus(userId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
-      run(supabase.from("roadmap_items").update({ status, updated_at: new Date().toISOString() }).eq("id", id).eq("user_id", userId).select()),
+      run(
+        supabase
+          .from("roadmap_items")
+          .update({ status: status.toUpperCase(), updated_at: new Date().toISOString() })
+          .eq("id", id)
+          .eq("user_id", userId)
+          .select()
+      ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["roadmap", userId] }),
     onError: (e) => toast.error(errMsg(e)),
   });

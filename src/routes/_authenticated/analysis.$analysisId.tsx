@@ -68,8 +68,9 @@ function AnalysisDetail() {
                 <Button asChild variant="outline"><Link to="/roadmap">View roadmap</Link></Button>
               ) : (
                 <Button variant="accent" disabled={gen.isPending || roadmap.isLoading || !rows.some((r) => r.gap)} onClick={() => gen.mutate(a)}>
-                  {gen.isPending ? "Creating…" : "Generate AI Roadmap"}
+                  {gen.isPending ? "Building your personalized roadmap..." : "Generate AI Roadmap"}
                 </Button>
+
               )}
               <Button asChild variant="ghost"><Link to="/skills">Update my skills</Link></Button>
             </div>

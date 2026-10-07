@@ -30,3 +30,19 @@ export function buildRoadmapContext(input: Omit<RoadmapContext, "gaps"> & { resu
   const { results, ...rest } = input;
   return { ...rest, gaps: results.filter((r) => r.current_level < r.required_level) };
 }
+
+/**
+ * Extracts the personalized AI roadmap summary from an analysis summary string, if present.
+ */
+export function extractRoadmapSummary(analysisSummary: string | null | undefined): string | null {
+  if (!analysisSummary) return null;
+  const match =
+    analysisSummary.match(/AI Roadmap:\s*([\s\S]+)$/i) ||
+    analysisSummary.match(/Roadmap Summary:\s*([\s\S]+)$/i);
+
+  const raw = match?.[1];
+  return raw ? raw.trim() : null;
+}
+
+
+
